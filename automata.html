@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xylosian Echoes - Alien Cellular Automaton</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Orbitron', sans-serif;
+            background-color: #1a1a2e; /* Deep space blue */
+            color: #e0e0fc; /* Nebula purple/white */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+            overflow-x: hidden; /* Prevent horizontal scroll */
+        }
+        .container {
+            background-color: #2a2a4e; /* Darker accent */
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 0 20px rgba(120, 120, 255, 0.3);
+            text-align: center;
+            width: 100%;
+            max-width: 90vw; /* Max width relative to viewport */
+        }
+        canvas {
+            border: 2px solid #7070ff; /* Lighter purple border */
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+            background-color: #0f0f1a; /* Very dark canvas background */
+            display: block; /* Remove extra space below canvas */
+            margin-left: auto;
+            margin-right: auto;
+            max-width: 100%; /* Ensure canvas is responsive */
+            height: auto; /* Maintain aspect ratio */
+        }
+        .controls button {
+            background-color: #4a4af6; /* Vibrant blue */
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            margin: 0.5rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .controls button:hover {
+            background-color: #6a6aff; /* Lighter blue on hover */
+        }
+        .controls button:active {
+            transform: scale(0.95);
+        }
+        /* Removed h1 and description styles as elements are gone, kept responsive for controls */
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            .controls button {
+                padding: 0.6rem 1.2rem;
+                font-size: 0.9rem;
+            }
+        }
+        @media (max-width: 480px) {
+            .controls {
+                display: flex;
+                flex-direction: column;
+            }
+            .controls button {
+                width: 100%;
+                margin: 0.25rem 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="caCanvas"></canvas>
+
+        <div class="controls mt-4 space-x-2">
+            <button id="startButton">Start</button>
+            <button id="stopButton">Stop</button>
+            <button id="resetButton">Reset</button>
+            <button id="randomizeButton">Randomize</button>
+        </div>
+        <div class="mt-4 text-sm">
+            <label for="speedRange" class="mr-2">Speed:</label>
+            <input type="range" id="speedRange" min="10" max="500" value="100" class="align-middle">
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const canvas = document.getElementById('caCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const GRID_WIDTH = 80; // Number of cells horizontally
+        const GRID_HEIGHT = 60; // Number of cells vertically
+        let CELL_SIZE = 10; // Initial cell size, will be adjusted
+
+        // --- State Definitions & Colors ---
+        const STATES = {
+            VOID: 0,      // Empty space, potential for colonization
+            SPORE: 1,     // Dormant life, can activate
+            FLORA: 2,     // Growing, spreading entity
+            CRYSTAL: 3,   // Inert, resilient structure
+            PULSAR: 4,    // Energetic, transformative entity
+            ANOMALY: 5    // Unstable, rare, and chaotic
+        };
+
+        const COLORS = {
+            [STATES.VOID]: '#0f0f1a',    // Very dark, almost black
+            [STATES.SPORE]: '#33cc33',   // Bioluminescent green
+            [STATES.FLORA]: '#4ddbff',   // Vibrant cyan/blue
+            [STATES.CRYSTAL]: '#cccccc', // Crystalline silver/grey
+            [STATES.PULSAR]: '#ff6600',  // Pulsing orange/red
+            [STATES.ANOMALY]: '#ff33cc'  // Shifting magenta/purple
+        };
+
+        let grid = [];
+        let nextGrid = [];
+        let animationId = null;
+        let animationSpeed = 100; // ms per frame, lower is faster
+
+        // --- Core CA Logic ---
+
+        // Initialize grids
+        function initGrids() {
+            grid = createEmptyGrid();
+            nextGrid = createEmptyGrid();
+            randomizeGrid(); // Start with a random configuration
+        }
+
+        function createEmptyGrid() {
+            return Array.from({ length: GRID_HEIGHT }, () => Array(GRID_WIDTH).fill(STATES.VOID));
+        }
+
+        // Populate grid with random states
+        function randomizeGrid() {
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    // Introduce more VOID initially to allow for growth
+                    const rand = Math.random();
+                    if (rand < 0.6) grid[y][x] = STATES.VOID;
+                    else if (rand < 0.8) grid[y][x] = STATES.SPORE;
+                    else if (rand < 0.9) grid[y][x] = STATES.FLORA;
+                    else if (rand < 0.95) grid[y][x] = STATES.CRYSTAL;
+                    else if (rand < 0.98) grid[y][x] = STATES.PULSAR;
+                    else grid[y][x] = STATES.ANOMALY;
+                }
+            }
+            // No need to call drawGrid() here if initGrids is called on load and reset,
+            // as those will call it. Randomize button will call it.
+        }
+        
+        // Count neighbors of each type
+        function countNeighbors(x, y) {
+            const neighborCounts = {};
+            for (let s in STATES) {
+                neighborCounts[STATES[s]] = 0;
+            }
+
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    if (i === 0 && j === 0) continue; // Skip self
+
+                    const nx = x + i;
+                    const ny = y + j;
+
+                    if (nx >= 0 && nx < GRID_WIDTH && ny >= 0 && ny < GRID_HEIGHT) {
+                        neighborCounts[grid[ny][nx]]++;
+                    }
+                }
+            }
+            return neighborCounts;
+        }
+
+        // Apply rules to determine next state of a cell
+        function applyRules(x, y) {
+            const currentState = grid[y][x];
+            const neighbors = countNeighbors(x, y);
+            let nextState = currentState;
+
+            switch (currentState) {
+                case STATES.VOID:
+                    // Colonization by Spores or Flora
+                    if (neighbors[STATES.SPORE] >= 2 && neighbors[STATES.SPORE] <= 4 && Math.random() < 0.1) nextState = STATES.SPORE;
+                    else if (neighbors[STATES.FLORA] >= 1 && neighbors[STATES.FLORA] <= 3 && Math.random() < 0.05) nextState = STATES.FLORA;
+                    else if (neighbors[STATES.PULSAR] >= 1 && Math.random() < 0.01) nextState = STATES.ANOMALY; // Pulsar can destabilize void
+                    break;
+
+                case STATES.SPORE:
+                    // Activation or decay
+                    if (neighbors[STATES.FLORA] >= 2 && neighbors[STATES.FLORA] <= 5 && Math.random() < 0.2) nextState = STATES.FLORA; // Activation
+                    else if (neighbors[STATES.PULSAR] >= 1 && Math.random() < 0.15) nextState = STATES.ANOMALY; // Pulsar energizes spores into anomalies
+                    else if (neighbors[STATES.VOID] >= 6 || Math.random() < 0.01) nextState = STATES.VOID; // Decay in isolation or randomly
+                    else if (neighbors[STATES.CRYSTAL] >= 3 && Math.random() < 0.05) nextState = STATES.CRYSTAL; // Spores can form crystals under pressure
+                    break;
+
+                case STATES.FLORA:
+                    // Growth, competition, or transformation
+                    if (neighbors[STATES.PULSAR] >= 1) { // Pulsars are aggressive
+                        if (Math.random() < 0.3) nextState = STATES.PULSAR; // Consumed/transformed by Pulsar
+                        else if (Math.random() < 0.1) nextState = STATES.ANOMALY; // Destabilized
+                    } else if (neighbors[STATES.FLORA] >= 5 || neighbors[STATES.FLORA] < 1) { // Overcrowding or isolation
+                        if (Math.random() < 0.1) nextState = STATES.SPORE; // Reverts to spore
+                    } else if (neighbors[STATES.CRYSTAL] >= 3 && Math.random() < 0.02) { // Flora can be overgrown by crystal
+                        nextState = STATES.CRYSTAL;
+                    } else if (neighbors[STATES.ANOMALY] >= 1 && Math.random() < 0.05) { // Anomalies can corrupt Flora
+                        nextState = STATES.ANOMALY;
+                    }
+                    break;
+
+                case STATES.CRYSTAL:
+                    // Mostly stable, but can be shattered or grow
+                    if (neighbors[STATES.PULSAR] >= 2 && Math.random() < 0.1) nextState = STATES.VOID; // Shattered by Pulsars
+                    else if (neighbors[STATES.ANOMALY] >= 1 && Math.random() < 0.2) nextState = STATES.ANOMALY; // Anomalies can destabilize crystals
+                    else if (neighbors[STATES.FLORA] === 0 && neighbors[STATES.SPORE] === 0 && Math.random() < 0.005) nextState = STATES.VOID; // Very slow decay if totally isolated
+                    break;
+
+                case STATES.PULSAR:
+                    // Expands, consumes, or burns out
+                    if (neighbors[STATES.FLORA] >= 1 && Math.random() < 0.4) { /* Stays Pulsar, consuming Flora implicitly by rule above */ }
+                    else if (neighbors[STATES.SPORE] >= 1 && Math.random() < 0.3) { /* Stays Pulsar, consuming Spores */ }
+                    else if (Math.random() < 0.08) nextState = STATES.VOID; // Burns out
+                    else if (neighbors[STATES.ANOMALY] >=1 && Math.random() < 0.1) nextState = STATES.ANOMALY; // Can merge/destabilize into anomaly
+                    break;
+
+                case STATES.ANOMALY:
+                    // Highly unstable, transforms self or neighbors
+                    if (Math.random() < 0.25) { // High chance of changing state
+                        const allStates = Object.values(STATES);
+                        nextState = allStates[Math.floor(Math.random() * allStates.length)];
+                    }
+                    // Anomalies can also convert neighbors (handled in other states' rules if they are near an anomaly)
+                    break;
+            }
+            nextGrid[y][x] = nextState;
+        }
+
+        // Update the entire grid for one generation
+        function updateGrid() {
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    applyRules(x, y);
+                }
+            }
+            // Swap grids
+            [grid, nextGrid] = [nextGrid, grid];
+        }
+
+        // --- Drawing ---
+        function drawGrid() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    ctx.fillStyle = COLORS[grid[y][x]];
+                    ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE -1, CELL_SIZE -1); // -1 for grid lines
+                }
+            }
+        }
+        
+        // --- Animation Loop ---
+        let lastFrameTime = 0;
+        function gameLoop(timestamp) {
+            if (animationId) { // only run if animation is active
+                const deltaTime = timestamp - lastFrameTime;
+                if (deltaTime >= animationSpeed) {
+                    lastFrameTime = timestamp;
+                    updateGrid();
+                    drawGrid();
+                }
+                animationId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // --- Controls ---
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const resetButton = document.getElementById('resetButton');
+        const randomizeButton = document.getElementById('randomizeButton');
+        const speedRange = document.getElementById('speedRange');
+
+        startButton.addEventListener('click', () => {
+            if (!animationId) {
+                animationId = requestAnimationFrame(gameLoop);
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+            }
+        });
+
+        resetButton.addEventListener('click', () => {
+            initGrids(); // This calls randomizeGrid which now calls drawGrid.
+            // If animation is stopped, ensure it's redrawn.
+            if (!animationId) drawGrid(); 
+        });
+        
+        randomizeButton.addEventListener('click', () => {
+            randomizeGrid();
+            // If animation is stopped, ensure it's redrawn.
+            if (!animationId) drawGrid(); 
+        });
+
+        speedRange.addEventListener('input', (e) => {
+            animationSpeed = 510 - parseInt(e.target.value); // Invert: slider right = faster = lower delay
+        });
+        
+        // --- Responsive Canvas ---
+        function resizeCanvas() {
+            const containerWidth = canvas.parentElement.clientWidth;
+            // Ensure CELL_SIZE is an integer and canvas width is a multiple of it for crisp pixels
+            CELL_SIZE = Math.max(2, Math.floor(containerWidth / GRID_WIDTH)); 
+            
+            canvas.width = GRID_WIDTH * CELL_SIZE;
+            canvas.height = GRID_HEIGHT * CELL_SIZE;
+            
+            // If canvas is too tall for the viewport, adjust CELL_SIZE based on height
+            // Consider available height minus some padding for controls etc.
+            const availableHeight = window.innerHeight * 0.7; // Increased to 70% for more canvas space
+            if (canvas.height > availableHeight) {
+                CELL_SIZE = Math.max(2, Math.floor(availableHeight / GRID_HEIGHT));
+                canvas.width = GRID_WIDTH * CELL_SIZE;
+                canvas.height = GRID_HEIGHT * CELL_SIZE;
+            }
+            
+            drawGrid(); // Redraw with new size
+        }
+
+        // --- Initialization ---
+        window.addEventListener('load', () => {
+            initGrids(); // This calls randomizeGrid which now calls drawGrid.
+            resizeCanvas(); // This also calls drawGrid.
+            stopButton.disabled = true; // Initially stopped
+        });
+        window.addEventListener('resize', resizeCanvas);
+
+    </script>
+</body>
+</html>
